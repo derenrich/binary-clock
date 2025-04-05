@@ -4,9 +4,12 @@
 
 use defmt::*;
 use embassy_executor::Spawner;
+use embassy_executor::Executor;
+
 use embassy_rp::gpio;
 use embassy_rp::gpio::Pull;
 use embassy_rp::peripherals::{I2C0};
+use embassy_rp::multicore::Stack;
 
 use shared_bus::BusManagerSimple;
 
@@ -31,10 +34,32 @@ fn build_time() -> u64 {
     BUILD_UNIX_EPOCH.parse().unwrap()
 }
 
+static mut CORE1_STACK: Stack<4096> = Stack::new();
+static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
+
+
+#[embassy_executor::task]
+async fn core1_task(mut led: Output<'static>) {
+    // blink the LED on core 1
+    loop {
+        led.toggle();
+
+        for _ in 0..1_000_000 {
+            cortex_m::asm::nop();
+        }
+    }
+}
+
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
-    let mut led = Output::new(p.PIN_25, Level::Low);    
+    let led: Output = Output::new(p.PIN_25, Level::Low);
+
+    embassy_rp::multicore::spawn_core1(p.CORE1, unsafe { &mut CORE1_STACK }, move || {
+        let executor1 = EXECUTOR1.init(Executor::new());
+        executor1.run(|spawner| spawner.spawn(core1_task(led)).unwrap());
+    });
+
 
     // GPIO 6 = PIN 9
     let mut one_hz = Input::new(p.PIN_6, Pull::Up);
@@ -44,16 +69,18 @@ async fn main(_spawner: Spawner) {
 
     let bus = I2C_BUS.init(BusManagerSimple::new(i2c));
 
-    let i2c_dev2 = bus.acquire_i2c();
-    let mut led_c = Is31fl32xx::<IS31FL3236, _>::init_with_i2c(0x00, i2c_dev2);
-    led_c.set_global_output(GlobalEnable::Enable).unwrap();
-    led_c.set_shutdown(SoftwareShutdownMode::Normal).unwrap();
 
     let i2c_dev1 = bus.acquire_i2c();
     let mut rtc = Ds323x::new_ds3231(i2c_dev1);
     rtc.set_square_wave_frequency(ds323x::SqWFreq::_1Hz).unwrap();
     rtc.use_int_sqw_output_as_square_wave().unwrap();
     rtc.enable_square_wave().unwrap();
+
+    let i2c_dev2 = bus.acquire_i2c();
+    let mut led_c = Is31fl32xx::<IS31FL3236, _>::init_with_i2c(0x00, i2c_dev2);
+    led_c.set_global_output(GlobalEnable::Enable).unwrap();
+    led_c.set_shutdown(SoftwareShutdownMode::Normal).unwrap();
+
 
     info!("build time: {}", build_time());
     let dt = rtc.datetime().unwrap();
@@ -67,7 +94,6 @@ async fn main(_spawner: Spawner) {
 
     loop {
         one_hz.wait_for_falling_edge().await;
-        led.toggle();
         let dt = rtc.datetime().unwrap();
         let temp = rtc.temperature().unwrap();
         let timestamp = dt.and_utc().timestamp();
@@ -81,7 +107,7 @@ async fn main(_spawner: Spawner) {
                 OutputMode::LEDOff
             };
             led_c.set_led(n, OutputCurrent::IMaxDiv3, output_mode).unwrap();
-            led_c.set_pwm(n, 0x1f as u8).unwrap();
+            led_c.set_pwm(n, 0x3f as u8).unwrap();
         }
     }
 }
