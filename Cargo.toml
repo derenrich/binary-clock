@@ -20,6 +20,14 @@ ds323x = "0.5.1"
 is31fl3236 = { git = "https://github.com/derenrich/is31fl3236.git" }
 shared-bus = "0.3.1"
 critical-section = "1.2.0"
+embassy-rp = { version = "0.4.0", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
+embassy-executor = { version = "0.7.0", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"]}
+embassy-embedded-hal = "0.3.0"
+embassy-time = "0.4.0"
+embassy-sync = "0.6.2"
+static_cell = "2.1.0"
+portable-atomic = { version = "1.5", features = ["critical-section"] }
+
 
 # but you can use any BSP. Uncomment this to use the pro_micro_rp2040 BSP instead
 # sparkfun-pro-micro-rp2040 = "0.8"
